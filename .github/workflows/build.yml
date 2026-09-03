@@ -82,7 +82,6 @@ jobs:
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
           echo "::group::Disk space before cleanup"
           df -h ${GITHUB_WORKSPACE}
-          du -sh . --exclude=out 2>/dev/null || true
           echo "::endgroup::"
           
           # Delete .repo (saves ~10GB, not needed after sync)
@@ -91,11 +90,7 @@ jobs:
           # Remove sync scripts
           rm -rf ${GITHUB_WORKSPACE}/OrangeFox/sync
           
-          # Remove unnecessary AOSP prebuilts and test data
-          rm -rf prebuilts/androidsim 2>/dev/null || true
-          rm -rf prebuilts/clang-tools 2>/dev/null || true
-          rm -rf prebuilts/checkstyle 2>/dev/null || true
-          rm -rf prebuilts/misc 2>/dev/null || true
+          # Remove test suites only (safe to delete, not needed for building)
           rm -rf cts 2>/dev/null || true
           rm -rf compatibility 2>/dev/null || true
           
