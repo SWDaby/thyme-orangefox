@@ -189,14 +189,18 @@ jobs:
             Based on [Samuioto/twrp_device_thyme](https://github.com/Samuioto/twrp_device_thyme) adapted for OrangeFox.
 
             ### Install
+            thyme is an A/B device with NO separate recovery partition.
+            The recovery image is flashed to the **boot** partition.
+
             ```bash
             # Boot to fastboot mode
+            adb reboot bootloader
             fastboot devices
 
-            # Flash recovery to both slots
-            fastboot flash ${{ env.RECOVERY_TYPE }}_a OrangeFox-*.img
-            fastboot flash ${{ env.RECOVERY_TYPE }}_b OrangeFox-*.img
+            # Flash to both slots
+            fastboot flash boot_a ${{ env.RECOVERY_TYPE }}.img
+            fastboot flash boot_b ${{ env.RECOVERY_TYPE }}.img
 
             # Boot to recovery
-            fastboot reboot recovery
+            fastboot boot ${{ env.RECOVERY_TYPE }}.img
             ```
