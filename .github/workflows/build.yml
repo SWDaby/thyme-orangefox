@@ -133,41 +133,68 @@ jobs:
       - name: Check if recovery image exists
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
-          OUT_DIR="out/target/product/${DEVICE_NAME}"
           
-          echo "::group::Output directory listing"
-          if [ -d "$OUT_DIR" ]; then
-            ls -lah "$OUT_DIR/" 2>&1 || true
-            echo "---"
-            find "$OUT_DIR" -name "*.img" -o -name "OrangeFox*" 2>/dev/null || true
-          else
-            echo "Output directory $OUT_DIR does not exist"
-          fi
+          echo "::group::Disk space"
+          df -h ${GITHUB_WORKSPACE}
           echo "::endgroup::"
           
-          # Check for OrangeFox image first, then fall back to recovery.img/boot.img
-          if ls "$OUT_DIR"/OrangeFox*.img 1> /dev/null 2>&1; then
+          echo "::group::Search for recovery images"
+          # Search entire out/ for any .img or OrangeFox files
+          find out/ -name "OrangeFox*.img" -o -name "recovery.img" -o -name "boot.img" 2>/dev/null || true
+          echo "---"
+          # Also list the target/product directory (handles doubled path)
+          find out/target/product/${DEVICE_NAME}/ -name "OrangeFox*" 2>/dev/null || true
+          echo "::endgroup::"
+          
+          # Try multiple possible locations for the image
+          IMG_FOUND=""
+          for path in \
+            "out/target/product/${DEVICE_NAME}/OrangeFox*.img" \
+            "out/target/product/${DEVICE_NAME}/target/product/${DEVICE_NAME}/OrangeFox*.img" \
+            "out/target/product/${DEVICE_NAME}/recovery.img" \
+            "out/target/product/${DEVICE_NAME}/target/product/${DEVICE_NAME}/recovery.img" \
+            "out/target/product/${DEVICE_NAME}/obj/PACKAGING/recoveryimage_intermediates/recovery.img" \
+            "out/target/product/${DEVICE_NAME}/target/product/${DEVICE_NAME}/obj/PACKAGING/recoveryimage_intermediates/recovery.img"; do
+            if ls $path 1> /dev/null 2>&1; then
+              IMG_FOUND=$(ls $path 2>/dev/null | head -1)
+              break
+            fi
+          done
+          
+          if [ -n "$IMG_FOUND" ]; then
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/$OUT_DIR" >> $GITHUB_ENV
-            echo "MD5_IMG=$(md5sum "$OUT_DIR"/OrangeFox*.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-            echo "Found OrangeFox image"
-          elif [ -f "$OUT_DIR/recovery.img" ]; then
-            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/$OUT_DIR" >> $GITHUB_ENV
-            echo "MD5_IMG=$(md5sum "$OUT_DIR"/recovery.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-            echo "Found recovery.img (renaming to OrangeFox format)"
-            cd "$OUT_DIR"
-            mv recovery.img "OrangeFox-unofficial-${DEVICE_NAME}.img"
-          elif [ -f "$OUT_DIR/boot.img" ]; then
-            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/$OUT_DIR" >> $GITHUB_ENV
-            echo "MD5_IMG=$(md5sum "$OUT_DIR"/boot.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
-            echo "Found boot.img (renaming to OrangeFox format)"
-            cd "$OUT_DIR"
-            mv boot.img "OrangeFox-unofficial-${DEVICE_NAME}.img"
+            echo "FILE_PATH=$(dirname $IMG_FOUND)" >> $GITHUB_ENV
+            echo "MD5_IMG=$(md5sum "$IMG_FOUND" | cut -d ' ' -f 1)" >> $GITHUB_ENV
+            echo "Found image: $IMG_FOUND"
+            # Normalize to OrangeFox naming
+            cd "$(dirname $IMG_FOUND)"
+            if [ ! -f "OrangeFox-unofficial-${DEVICE_NAME}.img" ]; then
+              cp "$(basename $IMG_FOUND)" "OrangeFox-unofficial-${DEVICE_NAME}.img"
+            fi
           else
-            echo "No recovery image found in output directory"
-            exit 1
+            echo "No .img file found, trying to extract from zip..."
+            ZIP_FILE=$(find out/ -name "OrangeFox*.zip" 2>/dev/null | head -1)
+            if [ -n "$ZIP_FILE" ]; then
+              echo "Found zip: $ZIP_FILE"
+              EXTRACT_DIR=$(dirname "$ZIP_FILE")
+              cd "$EXTRACT_DIR"
+              unzip -o "OrangeFox*.zip" -d extracted 2>/dev/null || true
+              IMG_IN_ZIP=$(find extracted/ -name "*.img" 2>/dev/null | head -1)
+              if [ -n "$IMG_IN_ZIP" ]; then
+                cp "$IMG_IN_ZIP" "OrangeFox-unofficial-${DEVICE_NAME}.img"
+                echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+                echo "FILE_PATH=$EXTRACT_DIR" >> $GITHUB_ENV
+                echo "MD5_IMG=$(md5sum "OrangeFox-unofficial-${DEVICE_NAME}.img" | cut -d ' ' -f 1)" >> $GITHUB_ENV
+                echo "Extracted image from zip"
+              else
+                echo "No .img found inside zip either"
+                ls -lah extracted/ 2>/dev/null || true
+                exit 1
+              fi
+            else
+              echo "No OrangeFox zip found either"
+              exit 1
+            fi
           fi
 
       - name: Rename recovery image
