@@ -1,0 +1,12 @@
+# Build outputs
+*.img
+*.zip
+*.tar
+out/
+
+# OrangeFox source tree
+OrangeFox/
+
+# Temporary files
+*.log
+*.tmp

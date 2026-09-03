@@ -1,0 +1,202 @@
+name: Build OrangeFox for Xiaomi 10S (thyme)
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_branch:
+        description: 'OrangeFox manifest branch'
+        required: true
+        default: '12.1'
+        type: choice
+        options:
+          - '12.1'
+          - '11.0'
+      build_target:
+        description: 'Build target partition'
+        required: true
+        default: 'recovery'
+        type: choice
+        options:
+          - recovery
+          - boot
+          - vendorboot
+
+env:
+  MANIFEST_BRANCH: ${{ github.event.inputs.manifest_branch || '12.1' }}
+  BUILD_TARGET: ${{ github.event.inputs.build_target || 'recovery' }}
+  DEVICE_NAME: thyme
+  DEVICE_PATH: device/xiaomi/thyme
+  TWRP_TREE_URL: https://github.com/Samuioto/twrp_device_thyme.git
+
+jobs:
+  build:
+    name: Build OrangeFox Recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clean up disk space
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Set up swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 24
+
+      - name: Display build configuration
+        run: |
+          echo "::group::Build Configuration"
+          echo "Manifest branch: ${MANIFEST_BRANCH}"
+          echo "Build target: ${BUILD_TARGET}"
+          echo "Device: ${DEVICE_NAME}"
+          echo "Device path: ${DEVICE_PATH}"
+          echo "::endgroup::"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt -y upgrade
+          git clone https://gitlab.com/OrangeFox/misc/scripts
+          cd scripts
+          sudo bash setup/android_build_env.sh
+
+      - name: Sync OrangeFox sources
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+          cd ${GITHUB_WORKSPACE}/OrangeFox
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch ${MANIFEST_BRANCH} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+
+      - name: Clone TWRP device tree
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+          git clone ${TWRP_TREE_URL} -b master ./${DEVICE_PATH}
+          cd ${DEVICE_PATH}
+          echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          echo "Device tree cloned successfully"
+
+      - name: Apply OrangeFox overlay
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+          
+          # Copy our OrangeFox-adapted files over the TWRP tree
+          cp -rf ${GITHUB_WORKSPACE}/overlay/* ./${DEVICE_PATH}/
+          
+          # Remove the TWRP product makefile (replaced by twrp_thyme.mk)
+          rm -f ./${DEVICE_PATH}/omni_thyme.mk
+          
+          echo "::group::Verify overlay files"
+          echo "=== AndroidProducts.mk ==="
+          cat ./${DEVICE_PATH}/AndroidProducts.mk
+          echo ""
+          echo "=== twrp_thyme.mk ==="
+          cat ./${DEVICE_PATH}/twrp_thyme.mk
+          echo ""
+          echo "=== vendorsetup.sh ==="
+          cat ./${DEVICE_PATH}/vendorsetup.sh
+          echo ""
+          echo "=== recovery.fstab ==="
+          cat ./${DEVICE_PATH}/recovery.fstab
+          echo "::endgroup::"
+
+      - name: Build OrangeFox
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+          
+          export FOX_BUILD_DEVICE=${DEVICE_NAME}
+          export ALLOW_MISSING_DEPENDENCIES=true
+          
+          source build/envsetup.sh
+          
+          if [ "${MANIFEST_BRANCH}" = "11.0" ] || [ "${MANIFEST_BRANCH}" = "12.1" ]; then
+            lunch twrp_${DEVICE_NAME}-eng
+          else
+            lunch omni_${DEVICE_NAME}-eng
+          fi
+          
+          make clean
+          mka adbd ${BUILD_TARGET}image
+
+      - name: Set build date
+        run: |
+          echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+
+      - name: Check if recovery image exists
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+          if ls out/target/product/${DEVICE_NAME}/OrangeFox*.img 1> /dev/null 2>&1; then
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/out/target/product/${DEVICE_NAME}" >> $GITHUB_ENV
+            echo "MD5_IMG=$(md5sum out/target/product/${DEVICE_NAME}/OrangeFox*.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+          else
+            echo "Recovery output directory is empty - build may have failed"
+            exit 1
+          fi
+
+      - name: Rename recovery image
+        run: |
+          cd ${{ env.FILE_PATH }}/
+          if [ "${BUILD_TARGET}" = "boot" ]; then
+            mv OrangeFox*.img boot.img
+            echo "RECOVERY_TYPE=boot" >> $GITHUB_ENV
+          elif [ "${BUILD_TARGET}" = "vendorboot" ]; then
+            mv OrangeFox*.img vendor_boot.img
+            echo "RECOVERY_TYPE=vendor_boot" >> $GITHUB_ENV
+          else
+            mv OrangeFox*.img recovery.img
+            echo "RECOVERY_TYPE=recovery" >> $GITHUB_ENV
+          fi
+
+      - name: Upload recovery image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeFox-${{ env.DEVICE_NAME }}-${{ env.BUILD_DATE }}
+          path: |
+            ${{ env.FILE_PATH }}/${{ env.RECOVERY_TYPE }}.img
+            ${{ env.FILE_PATH }}/OrangeFox*.zip
+          retention-days: 30
+
+      - name: Create release
+        if: env.CHECK_IMG_IS_OK == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ${{ env.FILE_PATH }}/${{ env.RECOVERY_TYPE }}.img
+            ${{ env.FILE_PATH }}/OrangeFox*.zip
+          name: OrangeFox for Xiaomi 10S (thyme) // ${{ env.BUILD_DATE }}
+          tag_name: ${{ github.run_id }}
+          body: |
+            ## OrangeFox Recovery for Xiaomi 10S (thyme)
+
+            | Item | Value |
+            |------|-------|
+            | **Build** | fox_${{ env.MANIFEST_BRANCH }} |
+            | **Date** | ${{ env.BUILD_DATE }} |
+            | **Target** | ${{ env.RECOVERY_TYPE }}.img |
+            | **MD5** | ${{ env.MD5_IMG }} |
+
+            ### Device tree
+            Based on [Samuioto/twrp_device_thyme](https://github.com/Samuioto/twrp_device_thyme) adapted for OrangeFox.
+
+            ### Install
+            ```bash
+            # Boot to fastboot mode
+            fastboot devices
+
+            # Flash recovery to both slots
+            fastboot flash ${{ env.RECOVERY_TYPE }}_a OrangeFox-*.img
+            fastboot flash ${{ env.RECOVERY_TYPE }}_b OrangeFox-*.img
+
+            # Boot to recovery
+            fastboot reboot recovery
+            ```
