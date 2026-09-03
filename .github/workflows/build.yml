@@ -113,6 +113,7 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
           
+          export FOX_BUILD_DEVICE=${DEVICE_NAME}
           export ALLOW_MISSING_DEPENDENCIES=true
           
           set +e
@@ -120,9 +121,9 @@ jobs:
           set -e
           
           if [ "${MANIFEST_BRANCH}" = "11.0" ] || [ "${MANIFEST_BRANCH}" = "12.1" ]; then
-            lunch twrp_${DEVICE_NAME}-eng && mka adbd ${BUILD_TARGET}image
+            lunch twrp_${DEVICE_NAME}-eng && make clean && mka adbd ${BUILD_TARGET}image
           else
-            lunch omni_${DEVICE_NAME}-eng && mka adbd ${BUILD_TARGET}image
+            lunch omni_${DEVICE_NAME}-eng && make clean && mka adbd ${BUILD_TARGET}image
           fi
 
       - name: Set build date
@@ -132,12 +133,40 @@ jobs:
       - name: Check if recovery image exists
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
-          if ls out/target/product/${DEVICE_NAME}/OrangeFox*.img 1> /dev/null 2>&1; then
-            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/out/target/product/${DEVICE_NAME}" >> $GITHUB_ENV
-            echo "MD5_IMG=$(md5sum out/target/product/${DEVICE_NAME}/OrangeFox*.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+          OUT_DIR="out/target/product/${DEVICE_NAME}"
+          
+          echo "::group::Output directory listing"
+          if [ -d "$OUT_DIR" ]; then
+            ls -lah "$OUT_DIR/" 2>&1 || true
+            echo "---"
+            find "$OUT_DIR" -name "*.img" -o -name "OrangeFox*" 2>/dev/null || true
           else
-            echo "Recovery output directory is empty - build may have failed"
+            echo "Output directory $OUT_DIR does not exist"
+          fi
+          echo "::endgroup::"
+          
+          # Check for OrangeFox image first, then fall back to recovery.img/boot.img
+          if ls "$OUT_DIR"/OrangeFox*.img 1> /dev/null 2>&1; then
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/$OUT_DIR" >> $GITHUB_ENV
+            echo "MD5_IMG=$(md5sum "$OUT_DIR"/OrangeFox*.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+            echo "Found OrangeFox image"
+          elif [ -f "$OUT_DIR/recovery.img" ]; then
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/$OUT_DIR" >> $GITHUB_ENV
+            echo "MD5_IMG=$(md5sum "$OUT_DIR"/recovery.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+            echo "Found recovery.img (renaming to OrangeFox format)"
+            cd "$OUT_DIR"
+            mv recovery.img "OrangeFox-unofficial-${DEVICE_NAME}.img"
+          elif [ -f "$OUT_DIR/boot.img" ]; then
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}/$OUT_DIR" >> $GITHUB_ENV
+            echo "MD5_IMG=$(md5sum "$OUT_DIR"/boot.img | cut -d ' ' -f 1)" >> $GITHUB_ENV
+            echo "Found boot.img (renaming to OrangeFox format)"
+            cd "$OUT_DIR"
+            mv boot.img "OrangeFox-unofficial-${DEVICE_NAME}.img"
+          else
+            echo "No recovery image found in output directory"
             exit 1
           fi
 
