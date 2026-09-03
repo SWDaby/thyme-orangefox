@@ -77,6 +77,36 @@ jobs:
           cd sync
           ./orangefox_sync.sh --branch ${MANIFEST_BRANCH} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
 
+      - name: Free up disk space after sync
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+          echo "::group::Disk space before cleanup"
+          df -h ${GITHUB_WORKSPACE}
+          du -sh . --exclude=out 2>/dev/null || true
+          echo "::endgroup::"
+          
+          # Delete .repo (saves ~10GB, not needed after sync)
+          rm -rf .repo
+          
+          # Remove sync scripts
+          rm -rf ${GITHUB_WORKSPACE}/OrangeFox/sync
+          
+          # Remove unnecessary AOSP prebuilts and test data
+          rm -rf prebuilts/androidsim 2>/dev/null || true
+          rm -rf prebuilts/clang-tools 2>/dev/null || true
+          rm -rf prebuilts/checkstyle 2>/dev/null || true
+          rm -rf prebuilts/misc 2>/dev/null || true
+          rm -rf cts 2>/dev/null || true
+          rm -rf compatibility 2>/dev/null || true
+          
+          # Clean apt cache
+          sudo apt-get clean
+          sudo rm -rf /var/cache/apt/*
+          
+          echo "::group::Disk space after cleanup"
+          df -h ${GITHUB_WORKSPACE}
+          echo "::endgroup::"
+
       - name: Clone TWRP device tree
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
