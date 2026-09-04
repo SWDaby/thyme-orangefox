@@ -41,6 +41,9 @@ TARGET_COPY_OUT_VENDOR := vendor
 # A/B
 AB_OTA_UPDATER := true
 TW_INCLUDE_REPACKTOOLS := true
+# Recovery is built as boot image (A/B device has no separate recovery partition)
+BOARD_USES_RECOVERY_AS_BOOT := true
+BOARD_BOOTIMAGE_PARTITION_SIZE := 100663296
 
 # Kernel
 BOARD_KERNEL_CMDLINE :=
