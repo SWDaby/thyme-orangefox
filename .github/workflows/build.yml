@@ -154,9 +154,9 @@ jobs:
           set -e
           
           if [ "${MANIFEST_BRANCH}" = "11.0" ] || [ "${MANIFEST_BRANCH}" = "12.1" ]; then
-            lunch twrp_${DEVICE_NAME}-eng && make clean && mka adbd ${BUILD_TARGET}image
+            lunch twrp_${DEVICE_NAME}-eng && mka adbd ${BUILD_TARGET}image
           else
-            lunch omni_${DEVICE_NAME}-eng && make clean && mka adbd ${BUILD_TARGET}image
+            lunch omni_${DEVICE_NAME}-eng && mka adbd ${BUILD_TARGET}image
           fi
           
           echo "::group::Disk space after build"
