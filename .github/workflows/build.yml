@@ -150,6 +150,59 @@ jobs:
           else
             lunch omni_${DEVICE_NAME}-eng && make clean && mka adbd ${BUILD_TARGET}image
           fi
+          
+          echo "::group::Disk space after build"
+          df -h ${GITHUB_WORKSPACE}
+          echo "::endgroup::"
+
+      - name: Rebuild recovery image if missing
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+          
+          # Check if OrangeFox img exists anywhere
+          if ! find out/ -name "OrangeFox*.img" 2>/dev/null | grep -q .; then
+            echo "OrangeFox .img not found, checking for raw recovery.img in intermediates..."
+            
+            # Search for any recovery.img in obj/PACKAGING
+            RAW_IMG=$(find out/ -path "*/obj/PACKAGING/*" -name "recovery.img" 2>/dev/null | head -1)
+            
+            if [ -n "$RAW_IMG" ]; then
+              echo "Found raw recovery.img: $RAW_IMG"
+              # Copy it to the expected output location
+              OUT_BASE="out/target/product/${DEVICE_NAME}/target/product/${DEVICE_NAME}"
+              mkdir -p "$OUT_BASE"
+              cp "$RAW_IMG" "$OUT_BASE/OrangeFox-unofficial-${DEVICE_NAME}.img"
+              echo "Copied raw recovery.img to output directory"
+            else
+              echo "No raw recovery.img found either. Attempting to rebuild just the image..."
+              
+              # Free up space by removing intermediate object files
+              echo "::group::Cleaning intermediates to free space"
+              find out/target/product/${DEVICE_NAME}/obj -name "*.o" -delete 2>/dev/null || true
+              find out/target/product/${DEVICE_NAME}/obj -name "*.a" -delete 2>/dev/null || true
+              df -h ${GITHUB_WORKSPACE}
+              echo "::endgroup::"
+              
+              set +e
+              source build/envsetup.sh
+              set -e
+              lunch twrp_${DEVICE_NAME}-eng
+              mka ${BUILD_TARGET}image
+              
+              # Check again
+              if ! find out/ -name "OrangeFox*.img" 2>/dev/null | grep -q .; then
+                RAW_IMG=$(find out/ -path "*/obj/PACKAGING/*" -name "recovery.img" 2>/dev/null | head -1)
+                if [ -n "$RAW_IMG" ]; then
+                  OUT_BASE="out/target/product/${DEVICE_NAME}/target/product/${DEVICE_NAME}"
+                  mkdir -p "$OUT_BASE"
+                  cp "$RAW_IMG" "$OUT_BASE/OrangeFox-unofficial-${DEVICE_NAME}.img"
+                else
+                  echo "Still no image found after rebuild"
+                  exit 1
+                fi
+              fi
+            fi
+          fi
 
       - name: Set build date
         run: |
