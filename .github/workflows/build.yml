@@ -125,22 +125,33 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
           
-          # Copy ONLY the Fox-required files over the 2025 MinecraftVM tree.
-          # Keep the tree's own BoardConfig prebuilts (kernel/dtb/dtbo), omni_thyme.mk,
-          # recovery.fstab, device.mk, etc. intact.
+          # MinecraftVM tree is omni-style (2025 community base). Overlay ONLY the
+          # Fox/device files we need; use a minimal Fox product makefile instead of
+          # its full_base_telephony-based one to keep the build small/robust.
           cp -f ${GITHUB_WORKSPACE}/overlay/BoardConfig.mk ./${DEVICE_PATH}/BoardConfig.mk
+          cp -f ${GITHUB_WORKSPACE}/overlay/device.mk ./${DEVICE_PATH}/device.mk
+          cp -f ${GITHUB_WORKSPACE}/overlay/recovery.fstab ./${DEVICE_PATH}/recovery.fstab
           cp -f ${GITHUB_WORKSPACE}/overlay/vendorsetup.sh ./${DEVICE_PATH}/vendorsetup.sh
+          cp -f ${GITHUB_WORKSPACE}/overlay/omni_thyme.mk ./${DEVICE_PATH}/omni_thyme.mk
           
           echo "::group::Verify overlay files"
-          echo "=== BoardConfig.mk (first 40 lines) ==="
-          head -40 ./${DEVICE_PATH}/BoardConfig.mk
-          echo ""
-          echo "=== vendorsetup.sh ==="
-          cat ./${DEVICE_PATH}/vendorsetup.sh
-          echo ""
           echo "=== product makefiles present ==="
           ls ./${DEVICE_PATH}/*.mk
+          echo ""
+          echo "=== BoardConfig.mk key lines ==="
+          grep -E "BOARD_BOOTIMG_HEADER_VERSION|BOARD_USES_RECOVERY_AS_BOOT|TARGET_PREBUILT_KERNEL|BOARD_BOOTIMAGE_PARTITION_SIZE" ./${DEVICE_PATH}/BoardConfig.mk
           echo "::endgroup::"
+
+      - name: Fetch prebuilt kernel (Image.gz-dtb from Samuioto tree)
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
+          mkdir -p ./${DEVICE_PATH}/prebuilt
+          # header-v3 style self-extracting arm64 kernel w/ appended DTB (same layout as
+          # the known-good community TWRP boot.img for this device)
+          curl -fL --retry 3 \
+            https://raw.githubusercontent.com/Samuioto/twrp_device_thyme/master/prebuilt/Image.gz-dtb \
+            -o ./${DEVICE_PATH}/prebuilt/Image.gz-dtb
+          ls -la ./${DEVICE_PATH}/prebuilt/
 
       - name: Build OrangeFox
         run: |
