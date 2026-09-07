@@ -154,10 +154,22 @@ jobs:
           set -e
           
           if [ "${MANIFEST_BRANCH}" = "11.0" ] || [ "${MANIFEST_BRANCH}" = "12.1" ]; then
-            lunch twrp_${DEVICE_NAME}-eng && mka adbd bootimage ${BUILD_TARGET}image
+            lunch twrp_${DEVICE_NAME}-eng
           else
-            lunch omni_${DEVICE_NAME}-eng && mka adbd bootimage ${BUILD_TARGET}image
+            lunch omni_${DEVICE_NAME}-eng
           fi
+
+          # The recoveryimage packaging rule (ramdisk_files-timestamp) rsyncs the
+          # generic boot ramdisk dir "$(TARGET_ROOT_OUT)/root" as the base for the
+          # recovery ramdisk. In this TWRP-only port nothing populates root/ (all
+          # content lives under recovery/root), so the dir is never created and
+          # ninja fails with: rsync: link_stat ".../root" failed: No such file.
+          # The dir only needs to EXIST and be empty - the rsync then no-ops and
+          # the Fox overlay steps (OrangeFox_A12.sh etc.) build the ramdisk.
+          mkdir -p "${ANDROID_PRODUCT_OUT}/root"
+          echo "Created empty TARGET_ROOT_OUT: ${ANDROID_PRODUCT_OUT}/root"
+
+          mka adbd ${BUILD_TARGET}image
           
           echo "::group::Disk space after build"
           df -h ${GITHUB_WORKSPACE}
