@@ -12,21 +12,24 @@ on:
           - '12.1'
           - '11.0'
       build_target:
-        description: 'Build target partition'
+        description: 'Build target partition (A/B device: flash to boot)'
         required: true
-        default: 'recovery'
+        default: 'boot'
         type: choice
         options:
-          - recovery
           - boot
+          - recovery
           - vendorboot
 
 env:
   MANIFEST_BRANCH: ${{ github.event.inputs.manifest_branch || '12.1' }}
-  BUILD_TARGET: ${{ github.event.inputs.build_target || 'recovery' }}
+  BUILD_TARGET: ${{ github.event.inputs.build_target || 'boot' }}
   DEVICE_NAME: thyme
   DEVICE_PATH: device/xiaomi/thyme
-  TWRP_TREE_URL: https://github.com/Samuioto/twrp_device_thyme.git
+  # 2025 community tree (MinecraftVM, SebaUbuntu generator): complete prebuilts
+  # (kernel + dtb + dtbo from MIUI14), recovery-as-boot, omni product.
+  TWRP_TREE_URL: https://github.com/MinecraftVM/xiaomi_thyme_twrp_tree.git
+  TWRP_TREE_BRANCH: main
 
 jobs:
   build:
@@ -113,7 +116,7 @@ jobs:
       - name: Clone TWRP device tree
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
-          git clone ${TWRP_TREE_URL} -b master ./${DEVICE_PATH}
+          git clone ${TWRP_TREE_URL} -b ${TWRP_TREE_BRANCH} ./${DEVICE_PATH}
           cd ${DEVICE_PATH}
           echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
           echo "Device tree cloned successfully"
@@ -122,24 +125,21 @@ jobs:
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${MANIFEST_BRANCH}
           
-          # Copy our OrangeFox-adapted files over the TWRP tree
-          cp -rf ${GITHUB_WORKSPACE}/overlay/* ./${DEVICE_PATH}/
-          
-          # Remove the TWRP product makefile (replaced by twrp_thyme.mk)
-          rm -f ./${DEVICE_PATH}/omni_thyme.mk
+          # Copy ONLY the Fox-required files over the 2025 MinecraftVM tree.
+          # Keep the tree's own BoardConfig prebuilts (kernel/dtb/dtbo), omni_thyme.mk,
+          # recovery.fstab, device.mk, etc. intact.
+          cp -f ${GITHUB_WORKSPACE}/overlay/BoardConfig.mk ./${DEVICE_PATH}/BoardConfig.mk
+          cp -f ${GITHUB_WORKSPACE}/overlay/vendorsetup.sh ./${DEVICE_PATH}/vendorsetup.sh
           
           echo "::group::Verify overlay files"
-          echo "=== AndroidProducts.mk ==="
-          cat ./${DEVICE_PATH}/AndroidProducts.mk
-          echo ""
-          echo "=== twrp_thyme.mk ==="
-          cat ./${DEVICE_PATH}/twrp_thyme.mk
+          echo "=== BoardConfig.mk (first 40 lines) ==="
+          head -40 ./${DEVICE_PATH}/BoardConfig.mk
           echo ""
           echo "=== vendorsetup.sh ==="
           cat ./${DEVICE_PATH}/vendorsetup.sh
           echo ""
-          echo "=== recovery.fstab ==="
-          cat ./${DEVICE_PATH}/recovery.fstab
+          echo "=== product makefiles present ==="
+          ls ./${DEVICE_PATH}/*.mk
           echo "::endgroup::"
 
       - name: Build OrangeFox
@@ -153,21 +153,14 @@ jobs:
           source build/envsetup.sh
           set -e
           
-          if [ "${MANIFEST_BRANCH}" = "11.0" ] || [ "${MANIFEST_BRANCH}" = "12.1" ]; then
-            lunch twrp_${DEVICE_NAME}-eng
-          else
-            lunch omni_${DEVICE_NAME}-eng
-          fi
+          # MinecraftVM tree is omni-style; OrangeFox 12.1 builds omni_<dev> fine
+          lunch omni_${DEVICE_NAME}-eng
 
-          # The recoveryimage packaging rule (ramdisk_files-timestamp) rsyncs the
-          # generic boot ramdisk dir "$(TARGET_ROOT_OUT)/root" as the base for the
-          # recovery ramdisk. In this TWRP-only port nothing populates root/ (all
-          # content lives under recovery/root), so the dir is never created and
-          # ninja fails with: rsync: link_stat ".../root" failed: No such file.
-          # The dir only needs to EXIST and be empty - the rsync then no-ops and
-          # the Fox overlay steps (OrangeFox_A12.sh etc.) build the ramdisk.
+          # Some AOSP recoveryimage packaging paths rsync $(TARGET_ROOT_OUT)/root as
+          # the ramdisk base; pre-creating the empty dir is harmless and avoids the
+          # "rsync: link_stat .../root failed" failure on minimal trees.
           mkdir -p "${ANDROID_PRODUCT_OUT}/root"
-          echo "Created empty TARGET_ROOT_OUT: ${ANDROID_PRODUCT_OUT}/root"
+          echo "Pre-created TARGET_ROOT_OUT: ${ANDROID_PRODUCT_OUT}/root"
 
           mka adbd ${BUILD_TARGET}image
           
@@ -206,9 +199,8 @@ jobs:
           
           if [ -n "$IMG_FOUND" ]; then
             echo "Found image: $IMG_FOUND"
-            # Fox names its output e.g. OrangeFox-R12.0-Unofficial-thyme.img.
             # Keep the found file's absolute path - do NOT copy another copy,
-            # otherwise the later `mv OrangeFox*.img` glob matches two files.
+            # otherwise a later `mv OrangeFox*.img` glob matches two files.
             IMG_PATH=$(realpath "$IMG_FOUND")
             FILE_DIR=$(dirname "$IMG_PATH")
             # Fox also produces an installer zip (if it exists); keep its abs path for later steps
@@ -286,7 +278,7 @@ jobs:
             | **MD5** | ${{ env.MD5_IMG }} |
 
             ### Device tree
-            Based on [Samuioto/twrp_device_thyme](https://github.com/Samuioto/twrp_device_thyme) adapted for OrangeFox.
+            Based on [MinecraftVM/xiaomi_thyme_twrp_tree](https://github.com/MinecraftVM/xiaomi_thyme_twrp_tree) (2025 community tree) adapted for OrangeFox.
 
             ### Install
             thyme is an A/B device with NO separate recovery partition.

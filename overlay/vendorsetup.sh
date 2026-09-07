@@ -63,13 +63,13 @@ if [ "$1" = "$FDEVICE" -o "$FOX_BUILD_DEVICE" = "$FDEVICE" ]; then
 	export FOX_VIRTUAL_AB_DEVICE=1
 	# Keymaster version for SM8250 (kona)
 	export OF_DEFAULT_KEYMASTER_VERSION=4.1
-	# Force prebuilt kernel (device uses prebuilt kernel)
+	# Force prebuilt kernel
 	export OF_FORCE_PREBUILT_KERNEL=1
 	# OTA and app management
 	export FOX_DELETE_AROMAFM=1
 	export FOX_ENABLE_APP_MANAGER=1
 
-	lunch twrp_$FDEVICE-eng
+	lunch omni_$FDEVICE-eng
 
 	# Log build vars
 	if [ -n "$FOX_BUILD_LOG_FILE" -a -f "$FOX_BUILD_LOG_FILE" ]; then
